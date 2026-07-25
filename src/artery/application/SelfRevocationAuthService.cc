@@ -172,10 +172,11 @@ void SelfRevocationAuthService::sendHeartbeat(HBMessage* hbMessage)
     req.gn.communication_profile = vanetza::geonet::CommunicationProfile::ITS_G5;
     req.gn.its_aid = HB_ITS_AID;
 
-    request(req, hbMessage);
-
     size_t messageSize = sizeof(HBMessage) + mMasterPRL.size() * sizeof(vanetza::security::HashedId8);
     mMetrics->recordHeartbeat(messageSize, simTime().dbl());
+
+    hbMessage->setByteLength(messageSize);
+    request(req, hbMessage);
 
     std::cout << "Heartbeat message sent. Revoked certificates: " << mMasterPRL.size() << std::endl;
 }
@@ -236,6 +237,13 @@ HBMessage* SelfRevocationAuthService::createAndPopulateHeartbeat()
     return hbMessage;
 }
 
+void SelfRevocationAuthService::recordCertificateIssuance(const std::string& vehicleId, const vanetza::security::Certificate& cert)
+{
+    mActiveVehicles.insert(vehicleId);
+    vanetza::security::HashedId8 hashedId = calculate_hash(cert);
+    mMetrics->recordCertificateIssuance(hashedId, simTime().dbl());
+}
+
 void SelfRevocationAuthService::revokeRandomCertificate()
 {
     if (mIssuedCertificates.empty()) {
@@ -245,7 +253,23 @@ void SelfRevocationAuthService::revokeRandomCertificate()
     // Determine the number of certificates to revoke (1 to 5)
     int numRevocations = intrand(3) + 1;
 
-    for (int i = 0; i < numRevocations; ++i) {
+    // Hard cap on mMasterPRL size: HBMessage has the identical layout to CRLMessage (496
+    // bytes fixed + 8 bytes/entry), so it hits the same 1398-byte GN SDU ceiling at 112
+    // entries (see extern/vanetza/vanetza/geonet/mib.cpp, itsGnMaxSduSize). Even though
+    // removeExpiredRevocations() prunes entries older than mTeff, a burst of firings can
+    // add faster than that prunes, so this needs the same cap. Truncates/skips this
+    // firing's additions only; the 45-85s trigger interval and 1-3 per-firing count
+    // distribution are left untouched.
+    const size_t MAX_ENTRIES = 112;
+    size_t remaining = (mMasterPRL.size() < MAX_ENTRIES) ? MAX_ENTRIES - mMasterPRL.size() : 0;
+    size_t toAdd = std::min(static_cast<size_t>(numRevocations), remaining);
+
+    if (toAdd < static_cast<size_t>(numRevocations)) {
+        Logger::log("PRL_CAP_TRUNCATED," + std::to_string(simTime().dbl()) +
+            ",requested=" + std::to_string(numRevocations) + ",added=" + std::to_string(toAdd));
+    }
+
+    for (size_t i = 0; i < toAdd; ++i) {
         if (mIssuedCertificates.empty()) {
             break;
         }

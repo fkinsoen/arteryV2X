@@ -169,7 +169,7 @@ void VehicleHBService::handleHBMessage(HBMessage* heartbeatMessage)
             const vanetza::security::HashedId8& revokedId = heartbeatMessage->getPRL(i);
             if (revokedId == ownHash) {
                 performSelfRevocation();
-                // Logger::log("SELF_REVOKE," + std::to_string(simTime().dbl()) + "," + hashedId8ToHexString(ownHash));
+                Logger::log("SELF_REVOKE_PRL," + std::to_string(simTime().dbl()) + "," + hashedId8ToHexString(ownHash));
                 return;
             }
         }
@@ -204,7 +204,9 @@ void VehicleHBService::handleV2VMessage(V2VMessage* v2vMessage)
 void VehicleHBService::checkDesynchronization(simtime_t messageTimestamp)
 {
     if (messageTimestamp.dbl() > mInternalClock + mTv) {
+        vanetza::security::HashedId8 ownHash = vanetza::security::calculate_hash(mPseudonymCertificate);
         performSelfRevocation();
+        Logger::log("SELF_REVOKE_DESYNC," + std::to_string(simTime().dbl()) + "," + hashedId8ToHexString(ownHash));
     }
 }
 

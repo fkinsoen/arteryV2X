@@ -173,6 +173,16 @@ void RevocationAuthorityService::sendCRL(CRLMessage* crlMessage)
     mMetrics->recordCRLDistribution(messageSize, simTime().dbl());
     mMetrics->recordCRLSize(mMasterCRL.size(), simTime().dbl());
 
+    // GN SDU limit (itsGnMaxSduSize, vanetza/geonet/mib.cpp) is 1398 bytes; with the current
+    // CRLMessage layout (496 bytes fixed + 8 bytes per revoked entry), 112 entries is the last
+    // size that still fits. Warn as the CRL approaches that so a future abort is traceable in
+    // the log instead of only visible as a build-tool exit code.
+    if (mMasterCRL.size() >= 107) {
+        Logger::log("WARNING: CRL size " + std::to_string(mMasterCRL.size()) +
+            " approaching GN SDU limit, simulation may abort.");
+    }
+
+    crlMessage->setByteLength(messageSize);
     request(req, crlMessage);
     std::cout << "CRL message sent. Revoked certificates: " << mMasterCRL.size() << std::endl;
 }
@@ -241,7 +251,22 @@ void RevocationAuthorityService::revokeRandomCertificate()
     // Determine the number of certificates to revoke (1 to 5)
     int numRevocations = intrand(3) + 1;
 
-    for (int i = 0; i < numRevocations; ++i) {
+    // Hard cap on mMasterCRL size: with the current CRLMessage layout (496 bytes fixed +
+    // 8 bytes/entry), 112 entries is the last size that still fits under vanetza's GN SDU
+    // limit (itsGnMaxSduSize = 1398, see extern/vanetza/vanetza/geonet/mib.cpp). Beyond
+    // that, validate_payload() rejects the message. This truncates/skips this firing's
+    // additions rather than letting mMasterCRL grow past the ceiling; the 45-85s trigger
+    // interval and the 1-3 per-firing count distribution themselves are left untouched.
+    const size_t MAX_ENTRIES = 112;
+    size_t remaining = (mMasterCRL.size() < MAX_ENTRIES) ? MAX_ENTRIES - mMasterCRL.size() : 0;
+    size_t toAdd = std::min(static_cast<size_t>(numRevocations), remaining);
+
+    if (toAdd < static_cast<size_t>(numRevocations)) {
+        Logger::log("CRL_CAP_TRUNCATED," + std::to_string(simTime().dbl()) +
+            ",requested=" + std::to_string(numRevocations) + ",added=" + std::to_string(toAdd));
+    }
+
+    for (size_t i = 0; i < toAdd; ++i) {
         if (mIssuedCertificates.empty()) {
             break;
         }

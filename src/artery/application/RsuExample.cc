@@ -156,7 +156,7 @@ void RsuExample::indicate(const btp::DataIndication& ind, cPacket* packet, const
                 id = payload.substr(dot + 1);
             }
 			vanetza::security::ecdsa256::PublicKey& public_key = pseudonymMessage->getPublic_key();
-			tempCert = GeneratePseudonym(pseudoRootHash, pseudoKeyPair.private_key, public_key);
+			tempCert = GeneratePseudonym(pseudoRootHash, pseudoKeyPair.private_key, public_key, 15.0);
 			boolPseudo = true;
 			pseudoCertificates.push_back(tempCert);
 			tempPseudoMessage = mPseudonymHandler->createPseudonymMessage(tempCert, id);

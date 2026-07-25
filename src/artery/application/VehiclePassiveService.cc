@@ -160,6 +160,15 @@ void VehiclePassiveService::handleV2VMessage(V2VMessage* v2vMessage)
         auto& vehicle = getFacilities().get_const<traci::VehicleController>();
         std::string receiverId = vehicle.getVehicleId();
         std::string senderId = v2vMessage->getPayload();
+
+        std::cout << "=== MESSAGE DISCARDED ===" << std::endl
+                  << "Receiving vehicle: " << receiverId << std::endl
+                  << "Sender's pseudonym has expired. Dropping message from vehicle " << senderId << std::endl
+                  << "=========================" << std::endl;
+
+        std::string logEntry = "MESSSAGE_DISCARDED," + std::to_string(simTime().dbl()) + "," + hashedId8ToHexString(certHash);
+        Logger::log(logEntry);
+        return;
     }
 
     if (!mV2VHandler->verifyV2VSignature(v2vMessage)) {

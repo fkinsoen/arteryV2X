@@ -97,7 +97,8 @@ void PseudoAuthService::handleEnrollmentRequest(EnrollmentRequest* request)
     vanetza::security::ecdsa256::PrivateKey privateKey = mKeyPair.private_key;
 
     HashedId8 rootHash = calculate_hash(mRootCert);
-    vanetza::security::Certificate pseudonymCert = GeneratePseudonym(rootHash, privateKey, vehiclePublicKey);
+    double pseudonymLifetime = par("pseudonymLifetime").doubleValue();
+    vanetza::security::Certificate pseudonymCert = GeneratePseudonym(rootHash, privateKey, vehiclePublicKey, pseudonymLifetime);
 
     mIssuedCertificates[vehicleId] = pseudonymCert;
     recordCertificateIssuance(vehicleId, pseudonymCert);
@@ -142,7 +143,7 @@ void PseudoAuthService::revokeRandomCertificate()
     }
     mIssuedCertificates.erase(it);
 
-    std::cout << "Vehicle " << vehicleId << " revoked. CRL size: " << mRevocationList.size() << std::endl;
+    Logger::log("Vehicle " + vehicleId + " revoked. Blacklist size: " + std::to_string(mRevocationList.size()));
 }
 
 void PseudoAuthService::generateandSendPseudo(

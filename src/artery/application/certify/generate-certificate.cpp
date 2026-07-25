@@ -82,7 +82,7 @@ Certificate vanetza::security::GenerateCertificate(const HashedId8& root_hash, e
     return certificate;
 }
 
-Certificate vanetza::security::GeneratePseudonym(const HashedId8& root_hash, ecdsa256::PrivateKey& root_key, ecdsa256::PublicKey& key)
+Certificate vanetza::security::GeneratePseudonym(const HashedId8& root_hash, ecdsa256::PrivateKey& root_key, ecdsa256::PublicKey& key, double lifetimeSeconds)
 {
     BackendCryptoPP crypto_backend;
     std::string subject_name = "Pseudonym certificate";
@@ -130,7 +130,7 @@ Certificate vanetza::security::GeneratePseudonym(const HashedId8& root_hash, ecd
     // set validity restriction
     StartAndEndValidity start_and_end;
     start_and_end.start_validity = convert_time32_adapted(omnetpp::simTime());
-    start_and_end.end_validity = convert_time32_adapted(omnetpp::simTime() + 15.0);
+    start_and_end.end_validity = convert_time32_adapted(omnetpp::simTime() + lifetimeSeconds);
     certificate.validity_restriction.push_back(start_and_end);
 
     // std::cout << "Signing certificate... ";

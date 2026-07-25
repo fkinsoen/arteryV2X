@@ -16,7 +16,7 @@ namespace security
 
 Certificate GenerateCertificate(const HashedId8& root_hash, ecdsa256::PrivateKey& root_key, ecdsa256::PublicKey& key);
 
-Certificate GeneratePseudonym(const HashedId8& root_hash, ecdsa256::PrivateKey& root_key, ecdsa256::PublicKey& key);
+Certificate GeneratePseudonym(const HashedId8& root_hash, ecdsa256::PrivateKey& root_key, ecdsa256::PublicKey& key, double lifetimeSeconds);
 
 Time32 convert_time32_adapted(const omnetpp::simtime_t& simTime);
 

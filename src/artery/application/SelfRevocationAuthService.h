@@ -27,6 +27,7 @@ protected:
     void sendHeartbeat(HBMessage* hbMessage);
     void scheduleNextRevocation();
     void scheduleNextBurstRevocation();
+    void recordCertificateIssuance(const std::string& vehicleId, const vanetza::security::Certificate& cert) override;
 
 private:
     std::unique_ptr<SelfRevocationMetrics> mMetrics;

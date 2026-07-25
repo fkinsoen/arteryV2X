@@ -115,6 +115,10 @@ void VehicleCRLService::handleCRLMessage(CRLMessage* crlMessage)
         revokedCertificates.push_back(crlMessage->getMRevokedCertificates(i));
     }
     updateLocalCRL(revokedCertificates);
+
+    auto& vehicle = getFacilities().get_const<traci::VehicleController>();
+    Logger::log("CRL_RECEIVED," + std::to_string(simTime().dbl()) +
+        "," + vehicle.getVehicleId() + "," + std::to_string(mLocalCRL.size()));
 }
 
 void VehicleCRLService::handlePseudonymMessage(PseudonymMessage* pseudonymMessage)
@@ -163,6 +167,7 @@ void VehicleCRLService::handleV2VMessage(V2VMessage* v2vMessage)
 
         std::string logEntry = "MESSSAGE_DISCARDED," + std::to_string(simTime().dbl()) + "," + convertToHexString(certHash);
         Logger::log(logEntry);
+        return;
     }
 
     if (!mV2VHandler->verifyV2VSignature(v2vMessage)) {
@@ -172,6 +177,9 @@ void VehicleCRLService::handleV2VMessage(V2VMessage* v2vMessage)
     auto& vehicle = getFacilities().get_const<traci::VehicleController>();
     std::string id = vehicle.getVehicleId();
     // std::cout << "Vehicle " << id << " got V2V from " << v2vMessage->getPayload() << std::endl;
+
+    Logger::log("MESSAGE_ACCEPTED," + std::to_string(simTime().dbl()) +
+        "," + convertToHexString(certHash) + "," + id);
 }
 
 void VehicleCRLService::updateLocalCRL(const std::vector<vanetza::security::HashedId8>& revokedCertificates)
