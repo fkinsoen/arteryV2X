@@ -10,6 +10,7 @@
 #include "artery/traci/MobilityBase.h"
 #include "artery/utility/InitStages.h"
 #include "inet/common/ModuleAccess.h"
+#include "Logger.h"
 
 using namespace omnetpp;
 
@@ -45,6 +46,8 @@ void VehicleMiddleware::initialize(int stage)
 
 void VehicleMiddleware::finish()
 {
+    Logger::log("VEHICLE_DEPARTED," + std::to_string(omnetpp::simTime().dbl()) + "," + getIdentity().traci);
+
     Middleware::finish();
     findHost()->unsubscribe(MobilityBase::stateChangedSignal, this);
 }

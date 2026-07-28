@@ -294,7 +294,7 @@ void SelfRevocationAuthService::revokeRandomCertificate()
 
         mMetrics->recordActiveVehicleCount(mActiveVehicles.size(), simTime().dbl());
 
-        Logger::log("REVOKE," + std::to_string(simTime().dbl()) + "," + convertToHexString(hashedId));
+        Logger::log("REVOKE," + std::to_string(simTime().dbl()) + "," + convertToHexString(hashedId) + "," + vehicleId);
         std::cout << "Vehicle " << vehicleId << " revoked. PRL size: " << mMasterPRL.size() << ", Active vehicles: " << mActiveVehicles.size() << std::endl;
     }
 }

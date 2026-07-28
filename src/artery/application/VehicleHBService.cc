@@ -198,7 +198,9 @@ void VehicleHBService::handleV2VMessage(V2VMessage* v2vMessage)
 
     vanetza::security::Certificate pseudo = v2vMessage->getCertificate();
     vanetza::security::HashedId8 hashedId = calculate_hash(pseudo);
-    Logger::log("RECV," + std::to_string(simTime().dbl()) + "," + hashedId8ToHexString(hashedId));
+    auto& receivingVehicle = getFacilities().get_const<traci::VehicleController>();
+    Logger::log("RECV," + std::to_string(simTime().dbl()) + "," + hashedId8ToHexString(hashedId) +
+        "," + receivingVehicle.getVehicleId());
 }
 
 void VehicleHBService::checkDesynchronization(simtime_t messageTimestamp)
@@ -206,7 +208,9 @@ void VehicleHBService::checkDesynchronization(simtime_t messageTimestamp)
     if (messageTimestamp.dbl() > mInternalClock + mTv) {
         vanetza::security::HashedId8 ownHash = vanetza::security::calculate_hash(mPseudonymCertificate);
         performSelfRevocation();
-        Logger::log("SELF_REVOKE_DESYNC," + std::to_string(simTime().dbl()) + "," + hashedId8ToHexString(ownHash));
+        auto& vehicle = getFacilities().get_const<traci::VehicleController>();
+        Logger::log("SELF_REVOKE_DESYNC," + std::to_string(simTime().dbl()) + "," + hashedId8ToHexString(ownHash) +
+            "," + vehicle.getVehicleId());
     }
 }
 

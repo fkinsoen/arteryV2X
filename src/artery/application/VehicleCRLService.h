@@ -33,10 +33,16 @@ protected:
     void trigger() override;
     void handleMessage(omnetpp::cMessage* msg) override;
 
-private:
+    // Exposed (private -> protected) for MaliciousCRLVehicleService (A1 gray-hole attack):
+    // its indicate() override must delegate to handlePseudonymMessage()/handleV2VMessage()
+    // and replicate the inline mState check indicate() performs on the PseudonymMessage branch.
     void handleCRLMessage(CRLMessage* crlMessage);
     void handlePseudonymMessage(PseudonymMessage* pseudonymMessage);
     void handleV2VMessage(V2VMessage* v2vMessage);
+    VehicleState mState = VehicleState::NOT_ENROLLED;
+    std::vector<vanetza::security::HashedId8> mLocalCRL;
+
+private:
     void updateLocalCRL(const std::vector<vanetza::security::HashedId8>& revokedCertificates);
     bool isRevoked(const vanetza::security::HashedId8& certificateHash) const;
     void sendEnrollmentRequest();
@@ -49,9 +55,6 @@ private:
     std::unique_ptr<CRLMessageHandler> mCRLHandler;
     std::unique_ptr<V2VMessageHandler> mV2VHandler;
     std::unique_ptr<PseudonymMessageHandler> mPseudonymHandler;
-    
-    VehicleState mState = VehicleState::NOT_ENROLLED;
-    std::vector<vanetza::security::HashedId8> mLocalCRL;
 
     static const vanetza::ItsAid ENROLLMENT_ITS_AID;
     static const vanetza::ItsAid V2V_ITS_AID;

@@ -289,7 +289,8 @@ void RevocationAuthorityService::revokeRandomCertificate()
 
         std::cout << "Vehicle " << vehicleId << " revoked. CRL size: " << mMasterCRL.size() << std::endl;
 
-        std::string logEntry = "REVOCATION_START," + std::to_string(simTime().dbl()) + "," + convertToHexString(hashedId);
+        std::string logEntry = "REVOCATION_START," + std::to_string(simTime().dbl()) + "," + convertToHexString(hashedId) +
+            "," + vehicleId;
         Logger::log(logEntry);
     }
 }
