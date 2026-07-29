@@ -19,6 +19,11 @@ simple Router
         bool disableBeaconing = default(false);
         bool isMobile = default(true);
 
+        // GN SDU size ceiling (vanetza MIB's itsGnMaxSduSize), exposed for the
+        // capacity-relaxed elevated-revocation-rate attack. Default (1398) reproduces
+        // vanetza's own MIB default exactly.
+        int maxSduSize = default(1398);
+
     gates:
         input radioDriverData;
         input radioDriverProperties;

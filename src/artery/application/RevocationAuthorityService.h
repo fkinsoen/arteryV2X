@@ -32,6 +32,7 @@ private:
     std::vector<vanetza::security::HashedId8> mMasterCRL;
 
     omnetpp::simtime_t mCrlGenInterval;
+    size_t mMaxCrlEntries;
 
     static const double MAX_REVOCATION_RATE;
     static const vanetza::ItsAid CRL_ITS_AID;

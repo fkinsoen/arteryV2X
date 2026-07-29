@@ -4,13 +4,16 @@
 #include "EnrollmentRequest_m.h"
 #include "PseudonymMessage_m.h"
 #include "artery/networking/GeoNetPacket.h"
+#include "artery/networking/Router.h"
 #include "certify/generate-certificate.hpp"
 #include "certify/generate-key.hpp"
 #include "certify/generate-root.hpp"
 
 #include <arpa/inet.h>
+#include <inet/common/ModuleAccess.h>
 #include <omnetpp.h>
 #include <vanetza/btp/data_request.hpp>
+#include <vanetza/btp/header.hpp>
 #include <vanetza/btp/ports.hpp>
 #include <vanetza/common/byte_buffer.hpp>
 #include <vanetza/geonet/data_confirm.hpp>
@@ -68,6 +71,41 @@ void RevocationAuthorityService::initialize()
     mDelayProbability = par("delayProbability").doubleValue();
     mDelayMean = par("delayMean").doubleValue();
     mDelayStdDev = par("delayStdDev").doubleValue();
+
+    mMaxCrlEntries = static_cast<size_t>(par("maxCrlEntries").intValue());
+
+    // Consistency check between this module's entry cap and the GN SDU ceiling it must fit
+    // under -- reads the Router's ACTUAL maxSduSize parameter live (same routerModule +
+    // getModuleFromPar<Router> pattern LocationTableLogger already uses to reach the same
+    // module), not a hand-duplicated shadow value that could drift out of sync with it (the
+    // way MAX_ENTRIES=112 itself had already drifted between this file and
+    // SelfRevocationAuthService.cc before this fix). Same 496 + 8*N formula sendCRL() itself
+    // uses for messageSize, PLUS the BTP header (vanetza::btp::HeaderB::length_bytes, 4
+    // bytes) that artery::Router::request() attaches to the packet before validate_payload()
+    // runs -- confirmed by an actual crash during smoke-testing this check: at
+    // maxCrlEntries=200/maxSduSize=2096 (496+200*8=2096, believed exactly-fitting), sendCRL()
+    // still threw cRuntimeError, because the real checked size was 2096+4=2100. Named
+    // constant used rather than a hardcoded 4 so this can't silently drift out of sync with
+    // vanetza's own header definition. Warning only, not a hard stop: if these two are ever
+    // raised inconsistently, sendCRL() will still throw a real cRuntimeError (via
+    // Router::request()) the moment mMasterCRL exceeds the true SDU limit -- this is meant to
+    // make that misconfiguration traceable in the log well before that happens, not to
+    // prevent it. Must NOT fire at the default (112 entries / 1398 bytes) pairing -- verified
+    // the corrected formula still doesn't: 496+112*8+4=1396 <= 1398.
+    {
+        auto* router = inet::getModuleFromPar<artery::Router>(par("routerModule"), findHost());
+        size_t liveMaxSduSize = static_cast<size_t>(router->par("maxSduSize").intValue());
+        size_t projectedMaxMessageSize = sizeof(CRLMessage) + mMaxCrlEntries * sizeof(vanetza::security::HashedId8) +
+            vanetza::btp::HeaderB::length_bytes;
+        if (projectedMaxMessageSize > liveMaxSduSize) {
+            Logger::log("WARNING: maxCrlEntries=" + std::to_string(mMaxCrlEntries) +
+                " would produce a CRL message of up to " + std::to_string(projectedMaxMessageSize) +
+                " bytes, exceeding the Router's live maxSduSize=" + std::to_string(liveMaxSduSize) +
+                " -- sendCRL() will crash the simulation (cRuntimeError via Router::request()) "
+                "once mMasterCRL reaches this size unless the Router's maxSduSize is raised to "
+                "match.");
+        }
+    }
 
     std::string mode = par("revocationMode").stdstringValue();
     if (mode == "interval") {
@@ -173,13 +211,14 @@ void RevocationAuthorityService::sendCRL(CRLMessage* crlMessage)
     mMetrics->recordCRLDistribution(messageSize, simTime().dbl());
     mMetrics->recordCRLSize(mMasterCRL.size(), simTime().dbl());
 
-    // GN SDU limit (itsGnMaxSduSize, vanetza/geonet/mib.cpp) is 1398 bytes; with the current
-    // CRLMessage layout (496 bytes fixed + 8 bytes per revoked entry), 112 entries is the last
-    // size that still fits. Warn as the CRL approaches that so a future abort is traceable in
-    // the log instead of only visible as a build-tool exit code.
-    if (mMasterCRL.size() >= 107) {
+    // Warn as the CRL approaches maxCrlEntries so a future abort is traceable in the log
+    // instead of only visible as a build-tool exit code. Threshold scales with maxCrlEntries
+    // (5-entry margin, matching the original hardcoded 107-at-112 relationship) rather than
+    // staying fixed at 107 now that the cap itself is configurable.
+    size_t warnThreshold = (mMaxCrlEntries > 5) ? mMaxCrlEntries - 5 : 0;
+    if (mMasterCRL.size() >= warnThreshold) {
         Logger::log("WARNING: CRL size " + std::to_string(mMasterCRL.size()) +
-            " approaching GN SDU limit, simulation may abort.");
+            " approaching maxCrlEntries=" + std::to_string(mMaxCrlEntries) + ", simulation may abort.");
     }
 
     crlMessage->setByteLength(messageSize);
@@ -251,14 +290,17 @@ void RevocationAuthorityService::revokeRandomCertificate()
     // Determine the number of certificates to revoke (1 to 5)
     int numRevocations = intrand(3) + 1;
 
-    // Hard cap on mMasterCRL size: with the current CRLMessage layout (496 bytes fixed +
-    // 8 bytes/entry), 112 entries is the last size that still fits under vanetza's GN SDU
-    // limit (itsGnMaxSduSize = 1398, see extern/vanetza/vanetza/geonet/mib.cpp). Beyond
-    // that, validate_payload() rejects the message. This truncates/skips this firing's
-    // additions rather than letting mMasterCRL grow past the ceiling; the 45-85s trigger
-    // interval and the 1-3 per-firing count distribution themselves are left untouched.
-    const size_t MAX_ENTRIES = 112;
-    size_t remaining = (mMasterCRL.size() < MAX_ENTRIES) ? MAX_ENTRIES - mMasterCRL.size() : 0;
+    // Hard cap on mMasterCRL size, now configurable via maxCrlEntries (default 112, the
+    // original hardcoded value -- see RevocationAuthorityService.ned). With the current
+    // CRLMessage layout (496 bytes fixed + 8 bytes/entry), 112 is the last size that still
+    // fits under vanetza's default GN SDU limit (itsGnMaxSduSize = 1398, see
+    // extern/vanetza/vanetza/geonet/mib.cpp); raising maxCrlEntries requires raising the
+    // Router's own maxSduSize to match (see the consistency check in initialize()), or
+    // validate_payload() rejects the message and the run aborts. This truncates/skips this
+    // firing's additions rather than letting mMasterCRL grow past the ceiling; the 45-85s
+    // trigger interval and the 1-3 per-firing count distribution themselves are left
+    // untouched -- this is not a change to revocation scheme behavior.
+    size_t remaining = (mMasterCRL.size() < mMaxCrlEntries) ? mMaxCrlEntries - mMasterCRL.size() : 0;
     size_t toAdd = std::min(static_cast<size_t>(numRevocations), remaining);
 
     if (toAdd < static_cast<size_t>(numRevocations)) {

@@ -90,6 +90,7 @@ void PseudoAuthService::handleEnrollmentRequest(EnrollmentRequest* request)
 
     if (std::find(mRevocationList.begin(), mRevocationList.end(), vehicleId) != mRevocationList.end()) {
         std::cout << "Pseudonym request denied from vehicle: " << vehicleId << std::endl;
+        Logger::log("DENIAL," + std::to_string(simTime().dbl()) + "," + vehicleId);
         return;
     }
 
