@@ -25,6 +25,11 @@ protected:
     void revokeBurst();
     void sendPseudonym(PseudonymMessage* pseudonymMessage);
     void generateandSendPseudo(vanetza::security::Certificate& pseudoCert, vanetza::security::ecdsa256::PublicKey& publicKey, std::string& vehicleId);
+    // Logs which certificate hash a vehicle holds at issuance time, since REVOKE only carries
+    // the vehicleId and RECV only carries the sender's certificate hash -- without this, there
+    // is no way to join the two and compute a receiver-side effective-revocation-time metric
+    // for passive revocation the way active/self-revocation's own logs already allow.
+    void recordCertificateIssuance(const std::string& vehicleId, const vanetza::security::Certificate& cert) override;
 
 private:
     std::vector<std::string> mRevocationList;

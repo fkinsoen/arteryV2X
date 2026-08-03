@@ -10,6 +10,7 @@
 #include "V2VMessageHandler.h"
 #include "vanetza/security/backend.hpp"
 #include "vanetza/security/ecdsa256.hpp"
+#include <vanetza/units/length.hpp>
 
 #include <omnetpp.h>
 
@@ -17,6 +18,9 @@
 
 namespace artery
 {
+
+class GlobalEnvironmentModel;
+class JammerRegistry;
 
 class VehicleHBService : public ItsG5Service
 {
@@ -44,12 +48,29 @@ private:
     void performSelfRevocation();
     std::string hashedId8ToHexString(const vanetza::security::HashedId8& hashedId);
 
+    // Mobile jamming bubble: single guard evaluated once per received packet, before the
+    // dynamic_cast dispatch chain (see JammingCheck.h for the actual radius test). Called
+    // with logTag="JAM_CHECK" for HBMessage/PseudonymMessage/anything else this service
+    // receives (indiscriminate drop), and separately with logTag="JAM_CHECK_V2V_CENSORED"
+    // for V2VMessage, since that is the peer-to-peer ground-truth traffic the
+    // effective-revocation-time metric is measured against and must remain distinguishable
+    // from a scheme-level accept/reject decision.
+    bool checkJammingBubble(const std::string& messageType, const std::string& logTag);
+
     std::unique_ptr<vanetza::security::BackendCryptoPP> mBackend;
     vanetza::security::ecdsa256::KeyPair mKeyPair;
     vanetza::security::Certificate mPseudonymCertificate;
     std::unique_ptr<V2VMessageHandler> mV2VHandler;
     std::unique_ptr<PseudonymMessageHandler> mPseudonymHandler;
     std::unique_ptr<HBMessageHandler> mHBHandler;
+
+    bool mJammingEnabled = false;
+    vanetza::units::Length mJammingRadius;
+    std::string mJammingTimingMode;
+    double mJammingT1 = 0.0;
+    double mJammingT2 = 0.0;
+    GlobalEnvironmentModel* mGlobalEnvironmentModel = nullptr;
+    JammerRegistry* mJammerRegistry = nullptr;
 
     static const vanetza::ItsAid ENROLLMENT_ITS_AID;
     static const vanetza::ItsAid V2V_ITS_AID;

@@ -2,6 +2,7 @@ add_artery_feature(envmod
     CarIdentityRegistrant.cc
     EnvironmentModelObject.cc
     GlobalEnvironmentModel.cc
+    JammerRegistry.cc
     LocalEnvironmentModel.cc
     sensor/BaseSensor.cc
     sensor/CamSensor.cc

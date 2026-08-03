@@ -4,16 +4,21 @@
 #include "CertificateManager.h"
 #include "EnrollmentRequest_m.h"
 #include "HBMessage_m.h"
+#include "JammingCheck.h"
 #include "PseudonymMessage_m.h"
 #include "RevocationAuthorityService.h"
 #include "V2VMessageHandler.h"
 #include "V2VMessage_m.h"
+#include "artery/envmod/GlobalEnvironmentModel.h"
+#include "artery/envmod/EnvironmentModelObject.h"
+#include "artery/envmod/JammerRegistry.h"
 #include "artery/networking/GeoNetPacket.h"
 #include "artery/traci/VehicleController.h"
 #include "certify/generate-key.hpp"
 #include "certify/generate-root.hpp"
 
 #include <arpa/inet.h>
+#include <inet/common/ModuleAccess.h>
 #include <omnetpp.h>
 #include <vanetza/btp/data_indication.hpp>
 #include <vanetza/btp/data_request.hpp>
@@ -63,6 +68,17 @@ void VehicleHBService::initialize()
     // Custom parameters
     mTv = par("validityWindow").doubleValue();
 
+    // Mobile jamming bubble (default disabled -- reproduces pre-existing behavior exactly).
+    mJammingEnabled = par("jammingEnabled");
+    if (mJammingEnabled) {
+        mJammingRadius = par("jammingRadius").doubleValue() * boost::units::si::meter;
+        mJammingTimingMode = par("jammingTimingMode").stdstringValue();
+        mJammingT1 = par("jammingT1").doubleValue();
+        mJammingT2 = par("jammingT2").doubleValue();
+        mGlobalEnvironmentModel = inet::getModuleFromPar<GlobalEnvironmentModel>(par("globalEnvironmentModule"), findHost());
+        mJammerRegistry = inet::getModuleFromPar<JammerRegistry>(par("jammerRegistryModule"), findHost());
+    }
+
     std::cout << "VehicleHBService initialized with Tv = " << mTv << " seconds." << std::endl;
 }
 
@@ -78,12 +94,25 @@ void VehicleHBService::indicate(const vanetza::btp::DataIndication& ind, cPacket
     checkDesynchronization(simTime());
 
     if (packet) {
-        if (auto* heartbeatMessage = dynamic_cast<HBMessage*>(packet)) {
+        if (auto* v2vMessage = dynamic_cast<V2VMessage*>(packet)) {
+            // Peer-to-peer ground truth for the effective-revocation-time metric: jammed
+            // separately from the scheme's own broadcast, under a distinct log tag, so a
+            // censored reception here is never conflated with a scheme-level accept/reject.
+            if (checkJammingBubble(packet->getClassName(), "JAM_CHECK_V2V_CENSORED")) {
+                delete packet;
+                return;
+            }
+            handleV2VMessage(v2vMessage);
+        } else if (checkJammingBubble(packet->getClassName(), "JAM_CHECK")) {
+            // Indiscriminate drop: covers the scheme's own broadcast (HBMessage) and any
+            // other non-metric-bearing message type this service receives (PseudonymMessage),
+            // closing the message-type-selectivity gap without touching TransportDispatcher.
+            delete packet;
+            return;
+        } else if (auto* heartbeatMessage = dynamic_cast<HBMessage*>(packet)) {
             handleHBMessage(heartbeatMessage);
         } else if (auto* pseudonymMessage = dynamic_cast<PseudonymMessage*>(packet)) {
             handlePseudonymMessage(pseudonymMessage);
-        } else if (auto* v2vMessage = dynamic_cast<V2VMessage*>(packet)) {
-            handleV2VMessage(v2vMessage);
         }
     }
     delete packet;
@@ -201,6 +230,51 @@ void VehicleHBService::handleV2VMessage(V2VMessage* v2vMessage)
     auto& receivingVehicle = getFacilities().get_const<traci::VehicleController>();
     Logger::log("RECV," + std::to_string(simTime().dbl()) + "," + hashedId8ToHexString(hashedId) +
         "," + receivingVehicle.getVehicleId());
+}
+
+bool VehicleHBService::checkJammingBubble(const std::string& messageType, const std::string& logTag)
+{
+    if (!mJammingEnabled) {
+        return false;
+    }
+
+    double now = simTime().dbl();
+    bool windowActive = (mJammingTimingMode == "alwaysOn") || (now >= mJammingT1 && now <= mJammingT2);
+    if (!windowActive) {
+        return false;
+    }
+
+    auto& receiverVehicle = getFacilities().get_const<traci::VehicleController>();
+    std::string receiverId = receiverVehicle.getVehicleId();
+    artery::Position receiverPos = receiverVehicle.getPosition();
+
+    bool jammed = false;
+    for (const auto& jammerId : mJammerRegistry->getJammerIds()) {
+        if (jammerId == receiverId) {
+            continue; // jammer does not jam itself
+        }
+
+        auto jammerObject = mGlobalEnvironmentModel->getObject(jammerId);
+        if (!jammerObject) {
+            continue; // jammer vehicle not currently in the simulation
+        }
+
+        artery::Position jammerPos = jammerObject->getCentrePoint();
+        vanetza::units::Length distance = jammingDistance(receiverPos, jammerPos);
+        bool inside = isWithinJammingRadius(receiverPos, jammerPos, mJammingRadius);
+
+        Logger::log(logTag + "," + std::to_string(now) + "," + receiverId + "," +
+            std::to_string(receiverPos.x.value()) + "," + std::to_string(receiverPos.y.value()) + "," +
+            jammerId + "," +
+            std::to_string(jammerPos.x.value()) + "," + std::to_string(jammerPos.y.value()) + "," +
+            std::to_string(distance.value()) + "," + (inside ? "DROP" : "PASS") + "," + messageType);
+
+        if (inside) {
+            jammed = true;
+        }
+    }
+
+    return jammed;
 }
 
 void VehicleHBService::checkDesynchronization(simtime_t messageTimestamp)

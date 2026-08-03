@@ -107,6 +107,17 @@ void PseudoAuthService::handleEnrollmentRequest(EnrollmentRequest* request)
     generateandSendPseudo(pseudonymCert, vehiclePublicKey, vehicleId);
 }
 
+// Records which certificate hash `vehicleId` was issued, so that a later REVOKE (vehicleId-only)
+// can be joined against RECV (certificate-hash-only) to compute the same receiver-side
+// effective-revocation-time metric already available for active/self-revocation. A vehicle may
+// hold several pseudonyms over its lifetime; the analysis side is responsible for picking the
+// hash that was current as of a given REVOKE's timestamp, not this logging call.
+void PseudoAuthService::recordCertificateIssuance(const std::string& vehicleId, const vanetza::security::Certificate& cert)
+{
+    vanetza::security::HashedId8 hashedId = calculate_hash(cert);
+    Logger::log("PSEUDONYM_ISSUED," + std::to_string(simTime().dbl()) + "," + vehicleId + "," + convertToHexString(hashedId));
+}
+
 void PseudoAuthService::handleMessage(cMessage* msg)
 {
     if (strcmp(msg->getName(), "triggerRevocation") == 0) {

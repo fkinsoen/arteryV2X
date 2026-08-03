@@ -14,6 +14,8 @@ add_library(core SHARED
     application/VehicleHBService.cc
     application/MaliciousCRLVehicleService.cc
     application/MaliciousHBVehicleService.cc
+    application/JammerMarkerService.cc
+    application/ProbeReceiverService.cc
     application/CRLMessage_m.cc
     application/HBMessage_m.cc
     application/EnrollmentRequest_m.cc

@@ -1,0 +1,6 @@
+<services>
+    <service type="artery.application.MaliciousHBVehicleService">
+        <listener port="2020"/>
+    </service>
+    <service type="artery.application.JammerMarkerService"/>
+</services>

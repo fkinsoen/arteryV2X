@@ -3,9 +3,13 @@
 #include "CRLMessageHandler.h"
 #include "CRLMessage_m.h"
 #include "EnrollmentRequest_m.h"
+#include "JammingCheck.h"
 #include "PseudonymMessage_m.h"
 #include "V2VMessageHandler.h"
 #include "V2VMessage_m.h"
+#include "artery/envmod/GlobalEnvironmentModel.h"
+#include "artery/envmod/EnvironmentModelObject.h"
+#include "artery/envmod/JammerRegistry.h"
 #include "artery/networking/GeoNetPacket.h"
 #include "artery/traci/VehicleController.h"
 #include "certify/generate-certificate.hpp"
@@ -13,6 +17,7 @@
 #include "certify/generate-root.hpp"
 
 #include <arpa/inet.h>
+#include <inet/common/ModuleAccess.h>
 #include <omnetpp.h>
 #include <vanetza/btp/data_indication.hpp>
 #include <vanetza/btp/data_request.hpp>
@@ -55,6 +60,17 @@ void VehiclePassiveService::initialize()
 
     mPseudonymHandler = std::unique_ptr<PseudonymMessageHandler>(new PseudonymMessageHandler(mBackend.get(), mKeyPair, tempPseudonym));
 
+    // Mobile jamming bubble (default disabled -- reproduces pre-existing behavior exactly).
+    mJammingEnabled = par("jammingEnabled");
+    if (mJammingEnabled) {
+        mJammingRadius = par("jammingRadius").doubleValue() * boost::units::si::meter;
+        mJammingTimingMode = par("jammingTimingMode").stdstringValue();
+        mJammingT1 = par("jammingT1").doubleValue();
+        mJammingT2 = par("jammingT2").doubleValue();
+        mGlobalEnvironmentModel = inet::getModuleFromPar<GlobalEnvironmentModel>(par("globalEnvironmentModule"), findHost());
+        mJammerRegistry = inet::getModuleFromPar<JammerRegistry>(par("jammerRegistryModule"), findHost());
+    }
+
     std::cout << "VehiclePassiveService initialized." << std::endl;
 }
 
@@ -67,14 +83,27 @@ void VehiclePassiveService::indicate(const vanetza::btp::DataIndication& ind, om
         return;
     }
 
-    if (auto* pseudonymMessage = dynamic_cast<PseudonymMessage*>(packet)) {
+    if (auto* v2vMessage = dynamic_cast<V2VMessage*>(packet)) {
+        // Peer-to-peer ground truth for the effective-revocation-time metric: jammed
+        // separately from the scheme's own broadcast, under a distinct log tag, so a
+        // censored reception here is never conflated with a scheme-level accept/reject.
+        if (checkJammingBubble(packet->getClassName(), "JAM_CHECK_V2V_CENSORED")) {
+            delete packet;
+            return;
+        }
+        handleV2VMessage(v2vMessage);
+    } else if (checkJammingBubble(packet->getClassName(), "JAM_CHECK")) {
+        // Indiscriminate drop: covers the scheme's own broadcast (PseudonymMessage) and any
+        // other non-metric-bearing message type this service receives, closing the
+        // message-type-selectivity gap without touching TransportDispatcher.
+        delete packet;
+        return;
+    } else if (auto* pseudonymMessage = dynamic_cast<PseudonymMessage*>(packet)) {
         if (mState == VehicleState::ENROLLED) {
             delete pseudonymMessage;
             return;
         }
         handlePseudonymMessage(pseudonymMessage);
-    } else if (auto* v2vMessage = dynamic_cast<V2VMessage*>(packet)) {
-        handleV2VMessage(v2vMessage);
     } else {
         // std::cout << "Unknown message type. Ignoring." << std::endl;
     }
@@ -143,6 +172,7 @@ void VehiclePassiveService::handlePseudonymMessage(PseudonymMessage* pseudonymMe
         }
     }
     mState = VehicleState::ENROLLED;
+    Logger::log("ENROLL_SUCCESS," + std::to_string(simTime().dbl()) + "," + currentVehicleId);
     std::cout << "Pseudonym updated for vehicle " << currentVehicleId << std::endl;
 }
 
@@ -181,6 +211,51 @@ void VehiclePassiveService::handleV2VMessage(V2VMessage* v2vMessage)
     // std::cout << "Vehicle " << id << " got V2V from " << v2vMessage->getPayload() << std::endl;
 }
 
+bool VehiclePassiveService::checkJammingBubble(const std::string& messageType, const std::string& logTag)
+{
+    if (!mJammingEnabled) {
+        return false;
+    }
+
+    double now = simTime().dbl();
+    bool windowActive = (mJammingTimingMode == "alwaysOn") || (now >= mJammingT1 && now <= mJammingT2);
+    if (!windowActive) {
+        return false;
+    }
+
+    auto& receiverVehicle = getFacilities().get_const<traci::VehicleController>();
+    std::string receiverId = receiverVehicle.getVehicleId();
+    artery::Position receiverPos = receiverVehicle.getPosition();
+
+    bool jammed = false;
+    for (const auto& jammerId : mJammerRegistry->getJammerIds()) {
+        if (jammerId == receiverId) {
+            continue; // jammer does not jam itself
+        }
+
+        auto jammerObject = mGlobalEnvironmentModel->getObject(jammerId);
+        if (!jammerObject) {
+            continue; // jammer vehicle not currently in the simulation
+        }
+
+        artery::Position jammerPos = jammerObject->getCentrePoint();
+        vanetza::units::Length distance = jammingDistance(receiverPos, jammerPos);
+        bool inside = isWithinJammingRadius(receiverPos, jammerPos, mJammingRadius);
+
+        Logger::log(logTag + "," + std::to_string(now) + "," + receiverId + "," +
+            std::to_string(receiverPos.x.value()) + "," + std::to_string(receiverPos.y.value()) + "," +
+            jammerId + "," +
+            std::to_string(jammerPos.x.value()) + "," + std::to_string(jammerPos.y.value()) + "," +
+            std::to_string(distance.value()) + "," + (inside ? "DROP" : "PASS") + "," + messageType);
+
+        if (inside) {
+            jammed = true;
+        }
+    }
+
+    return jammed;
+}
+
 bool VehiclePassiveService::isRevoked(const vanetza::security::Certificate& certificate) const
 {
     Time32 validity;
@@ -211,6 +286,7 @@ void VehiclePassiveService::sendEnrollmentRequest()
     req.gn.its_aid = ENROLLMENT_ITS_AID;
 
     request(req, enrollmentRequest);
+    Logger::log("ENROLL_REQUEST_SENT," + std::to_string(simTime().dbl()) + "," + id);
     std::cout << "Enrollment request sent from: " << id << std::endl;
 }
 

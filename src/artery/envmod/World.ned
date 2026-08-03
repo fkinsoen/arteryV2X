@@ -7,6 +7,7 @@
 package artery.envmod;
 
 import artery.envmod.GlobalEnvironmentModel;
+import artery.envmod.JammerRegistry;
 import artery.envmod.LocalEnvironmentModel;
 import artery.inet.World;
 import artery.utility.IdentityRegistry;
@@ -15,6 +16,7 @@ network World extends artery.inet.World
 {
     parameters:
         **.globalEnvironmentModule = default("environmentModel");
+        **.jammerRegistryModule = default("jammerRegistry");
 
     submodules:
         environmentModel: GlobalEnvironmentModel {
@@ -28,5 +30,10 @@ network World extends artery.inet.World
         idRegistry: IdentityRegistry {
             parameters:
                 @display("p=180,20");
+        }
+
+        jammerRegistry: JammerRegistry {
+            parameters:
+                @display("p=220,20");
         }
 }
