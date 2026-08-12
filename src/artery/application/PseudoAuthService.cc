@@ -144,18 +144,34 @@ void PseudoAuthService::revokeRandomCertificate()
         return;
     }
 
-    auto it = mIssuedCertificates.begin();
-    std::advance(it, intrand(mIssuedCertificates.size()));
-    std::string vehicleId = it->first;
+    // Matches active/self-revocation's own RA batching exactly (see
+    // RevocationAuthorityService::revokeRandomCertificate() and
+    // SelfRevocationAuthService::revokeRandomCertificate()): 1-3 certificates
+    // revoked per RA decision event rather than always exactly one, so all
+    // three schemes' revocation-generation process is driven by the same
+    // random distribution. Selection method (uniform over mIssuedCertificates)
+    // and blacklist/logging logic are unchanged from passive's own original
+    // single-certificate implementation.
+    int numRevocations = intrand(3) + 1;
 
-    if (std::find(mRevocationList.begin(), mRevocationList.end(), vehicleId) == mRevocationList.end()) {
-        mRevocationList.push_back(vehicleId);
-        std::string logEntry = "REVOKE," + std::to_string(simTime().dbl()) + "," + vehicleId;
-        Logger::log(logEntry);
+    for (int i = 0; i < numRevocations; ++i) {
+        if (mIssuedCertificates.empty()) {
+            break;
+        }
+
+        auto it = mIssuedCertificates.begin();
+        std::advance(it, intrand(mIssuedCertificates.size()));
+        std::string vehicleId = it->first;
+
+        if (std::find(mRevocationList.begin(), mRevocationList.end(), vehicleId) == mRevocationList.end()) {
+            mRevocationList.push_back(vehicleId);
+            std::string logEntry = "REVOKE," + std::to_string(simTime().dbl()) + "," + vehicleId;
+            Logger::log(logEntry);
+        }
+        mIssuedCertificates.erase(it);
+
+        Logger::log("Vehicle " + vehicleId + " revoked. Blacklist size: " + std::to_string(mRevocationList.size()));
     }
-    mIssuedCertificates.erase(it);
-
-    Logger::log("Vehicle " + vehicleId + " revoked. Blacklist size: " + std::to_string(mRevocationList.size()));
 }
 
 void PseudoAuthService::generateandSendPseudo(

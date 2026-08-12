@@ -102,8 +102,9 @@ function(add_opp_run name)
     _build_opp_run_command(TARGET ${target} OUTPUT exec NED_FOLDERS ${args_NED_FOLDERS})
 
     string(REPLACE " " ";" run_flags "${RUN_FLAGS}")
+    set(stdout_log "${working_directory}/stdout_run_$(date +%Y%m%d_%H%M%S).log")
     add_custom_target(run_${name}
-        COMMAND ${exec} ${config} ${run_flags}
+        COMMAND sh -c "\"$@\" >\"${stdout_log}\" 2>&1" _ ${exec} ${config} ${run_flags}
         WORKING_DIRECTORY ${working_directory}
         VERBATIM)
 
